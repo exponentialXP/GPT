@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from model import Model, ModelArgs
 import time
 import math
+import numpy as np
 
 load = True
 batch_size = 64 
@@ -21,22 +22,13 @@ min_lr = 6e-5
 dropout = 0.0
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-vocab_size = 1024
+vocab_size = 12000
 
 torch.manual_seed(42)
 
-with open('input.txt', 'r', encoding='utf-8') as f:
-    text = f.read()
-
-from tokenizers import ByteLevelBPETokenizer
-tokenizer = ByteLevelBPETokenizer()
-tokenizer.train(['input.txt'], vocab_size=vocab_size)
-tokenizer.save('tokenizer.json')
-
-data = torch.tensor(tokenizer.encode(text).ids, dtype=torch.long)
-n = int(0.94*len(data))
-train_data = data[:n]
-val_data = data[n:]
+train_data, val_data = torch.tensor(torch.load('tokenized_train_text.pt'), dtype=torch.long), torch.tensor(torch.load('tokenized_val_text.pt'), dtype=torch.long)
+from tokenizers import Tokenizer
+tokenizer = Tokenizer.from_file("./tokenizer.json")
 
 def get_lr(it):
     if it < warmup_iters:
@@ -104,6 +96,7 @@ while iter < max_iters:
         checkpoint = {
             'model_params': model.state_dict(), 
             'optimizer_params': optimizer.state_dict(), 
+            'args': args,
             'iter': iter
         }
         torch.save(checkpoint, f'modelsave.pt')
