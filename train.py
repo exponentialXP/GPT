@@ -4,16 +4,19 @@ from torch.nn import functional as F
 from model import Model, ModelArgs
 import time
 import math
+import pickle
 import numpy as np
 
 load = True
-batch_size = 64 
+batch_size = 32
+gradient_accumulation_steps = 6
+grad_clip = 1.0
 window_size = 256 
-emb_dim = 256
+emb_dim = 128
 n_heads = 4
 n_layers = 4
-max_iters = 2_000
-eval_interval = 300
+max_iters = 3_000
+eval_interval = 100
 save_interval = 300
 warmup_iters = 300
 lr_decay_iters = max_iters
@@ -22,13 +25,16 @@ min_lr = 6e-5
 dropout = 0.0
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-vocab_size = 12000
 
 torch.manual_seed(42)
 
-train_data, val_data = torch.tensor(torch.load('tokenized_train_text.pt'), dtype=torch.long), torch.tensor(torch.load('tokenized_val_text.pt'), dtype=torch.long)
+scaler = torch.cuda.amp.GradScaler()
+
+train_data, val_data = pickle.load(open('data.pkl', 'rb')), pickle.load(open('val_data.pkl', 'rb'))
+
 from tokenizers import Tokenizer
 tokenizer = Tokenizer.from_file("./tokenizer.json")
+vocab_size = tokenizer.get_vocab_size()
 
 def get_lr(it):
     if it < warmup_iters:
@@ -43,9 +49,12 @@ def get_lr(it):
 def get_batch(split):
     data = train_data if split == 'train' else val_data
     ix = torch.randint(len(data) - window_size, (batch_size,))
-    x = torch.stack([data[i:i+window_size] for i in ix])
-    y = torch.stack([data[i+1:i+window_size+1] for i in ix])
-    x, y = x.to(device), y.to(device)
+    x = torch.stack([torch.from_numpy((data[i:i+window_size]).astype(np.int64)) for i in ix])
+    y = torch.stack([torch.from_numpy((data[i+1:i+1+window_size]).astype(np.int64)) for i in ix])
+    if device == 'cuda':
+        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+    else:
+        x, y = x.to(device), y.to(device)
     return x, y
 
 @torch.no_grad()
@@ -101,14 +110,22 @@ while iter < max_iters:
         }
         torch.save(checkpoint, f'modelsave.pt')
 
-    xb, yb = get_batch('train')
+    for g in range(gradient_accumulation_steps):
+        xb, yb = get_batch('train')
+        with torch.amp.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(xb, yb)
+            loss = loss / gradient_accumulation_steps
 
-    logits, loss = model(xb, yb)
+        scaler.scale(loss).backward()
+    
+    scaler.unscale_(optimizer)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
+    scaler.step(optimizer)
+    scaler.update()
     optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
 
     iter += 1
 
-context = torch.tensor((tokenizer.encode("Third Citizen:").ids), dtype=torch.long, device=device).unsqueeze(0)
+context = torch.tensor((tokenizer.encode("[EOS]").ids), dtype=torch.long, device=device).unsqueeze(0)
 print(tokenizer.decode(model.generate(context, max_new_tokens=500)[0].tolist()))
