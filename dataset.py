@@ -4,13 +4,15 @@ import os
 from datasets import load_dataset 
 from tokenizers import Tokenizer
 import numpy as np
+from tqdm import tqdm
 
 if __name__ == '__main__':
     arr_data = []
     val_data = []
     
-    max_examples = 50_000
+    max_examples = 500_000
     max_val_examples = 5000
+    pbar = tqdm(total=max_examples+max_val_examples, desc="Tokenizing + Processing...")
     tracemalloc.start()
     dataset = load_dataset('openwebtext', streaming=True)
 
@@ -38,28 +40,28 @@ if __name__ == '__main__':
             del data
             
             examples += 1
-            if examples % 1000 == 0:
-                print(f"Examples Processed: {examples}")
+            pbar.update(1)
+
 
     print("Current: %d, Peak %d" % tracemalloc.get_traced_memory())
     print(f"Current data.pkl size: {os.path.getsize('data.pkl')/(1024*1024):.3f}MB | Current val data.pkl size: {os.path.getsize('val_data.pkl')/(1024*1024):.3f}MB")
 
-    with open('data.pkl', 'rb') as f:
-        arr_data = []
-        while True:
-            try:
-                data = pickle.load(f)
-                arr_data.append(data)
-            except EOFError:
-                break
+    # with open('data.pkl', 'rb') as f:
+    #     arr_data = []
+    #     while True:
+    #         try:
+    #             data = pickle.load(f)
+    #             arr_data.append(data)
+    #         except EOFError:
+    #             break
     
-    with open('val_data.pkl', 'rb') as f_val:
-        arr_val_data = []
-        while True:
-            try:
-                data_val = pickle.load(f_val)
-                arr_val_data.append(data_val)
-            except EOFError:
-                break
+    # with open('val_data.pkl', 'rb') as f_val:
+    #     arr_val_data = []
+    #     while True:
+    #         try:
+    #             data_val = pickle.load(f_val)
+    #             arr_val_data.append(data_val)
+    #         except EOFError:
+    #             break
 
     # print(f"-----------------Train\n{arr_data}\n ------------------Val\n{arr_val_data}")
