@@ -9,13 +9,13 @@ import numpy as np
 
 load = True
 batch_size = 32
-gradient_accumulation_steps = 6
+gradient_accumulation_steps = 16
 grad_clip = 1.0
 window_size = 256 
-emb_dim = 128
+emb_dim = 256
 n_heads = 4
 n_layers = 4
-max_iters = 3_000
+max_iters = 10_000
 eval_interval = 100
 save_interval = 300
 warmup_iters = 300
@@ -31,7 +31,7 @@ torch.manual_seed(42)
 scaler = torch.cuda.amp.GradScaler()
 
 train_data, val_data = pickle.load(open('data.pkl', 'rb')), pickle.load(open('val_data.pkl', 'rb'))
-
+print(f"Amount of tokens in training dataset: {train_data.shape[0]:,}")
 from tokenizers import Tokenizer
 tokenizer = Tokenizer.from_file("./tokenizer.json")
 vocab_size = tokenizer.get_vocab_size()
@@ -64,8 +64,8 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch(split)
-            logits, loss = model(X, Y)
+            xv, yv = get_batch(split)
+            logits, loss = model(xv, yv)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -90,16 +90,11 @@ if os.path.exists('modelsave.pt') and load == True:
 else:
     iter = 0
 
+xb, yb = get_batch('train')
 start_time = time.time()
 while iter < max_iters:
     for param_group in optimizer.param_groups:
         param_group['lr'] = get_lr(iter)
-
-    if iter % eval_interval == 0:
-        losses = estimate_loss()
-        end_time = time.time() 
-        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, time: {end_time - start_time:.4f}s")
-        start_time = time.time()
     
     if iter % save_interval == 0:
         checkpoint = {
@@ -109,13 +104,19 @@ while iter < max_iters:
             'iter': iter
         }
         torch.save(checkpoint, f'modelsave.pt')
+    
+    if iter % eval_interval == 0:
+        losses = estimate_loss()
+        end_time = time.time() 
+        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, time: {end_time - start_time:.4f}s")
+        start_time = time.time()
 
     for g in range(gradient_accumulation_steps):
-        xb, yb = get_batch('train')
         with torch.amp.autocast(device_type=device, dtype=torch.bfloat16):
             logits, loss = model(xb, yb)
             loss = loss / gradient_accumulation_steps
 
+        xb, yb = get_batch('train')
         scaler.scale(loss).backward()
     
     scaler.unscale_(optimizer)
@@ -127,5 +128,5 @@ while iter < max_iters:
 
     iter += 1
 
-context = torch.tensor((tokenizer.encode("[EOS]").ids), dtype=torch.long, device=device).unsqueeze(0)
+context = torch.tensor((tokenizer.encode("<|endoftext|>").ids), dtype=torch.long, device=device).unsqueeze(0)
 print(tokenizer.decode(model.generate(context, max_new_tokens=500)[0].tolist()))
