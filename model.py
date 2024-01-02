@@ -125,11 +125,14 @@ class Model(nn.Module):
         return sum(p.numel() for p in self.parameters()) - self.pos_emb.weight.numel()
     
     @torch.no_grad()
-    def generate(self, x, max_new_tokens=500):
+    def generate(self, x, max_new_tokens=500, temperature=1.0, top_k=200):
         for _ in range(max_new_tokens):
             x_trim = x[:, -self.args.window_size:]
             logits, _ = self(x_trim)
-            logits = logits[:, -1, :] 
+            logits = logits[:, -1, :] / temperature
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('Inf') 
             probs = F.softmax(logits, dim=-1) 
             x_next = torch.multinomial(probs, num_samples=1) 
             x = torch.cat((x, x_next), dim=1) 
