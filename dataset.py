@@ -1,49 +1,65 @@
-# CURRENTLY NOT USABLE FOR HUGE (like 8+ GB or whatever is your RAM) DATASETS!
+import tracemalloc
+import pickle
+import os
+from datasets import load_dataset 
+from tokenizers import Tokenizer
+import numpy as np
 
-import torch
-from datasets import load_dataset
+if __name__ == '__main__':
+    arr_data = []
+    val_data = []
+    
+    max_examples = 250_000
+    max_val_examples = 5000
+    tracemalloc.start()
+    dataset = load_dataset('openwebtext', streaming=True)
 
-dataset = load_dataset('Skylion007/openwebtext', streaming=True)
-max_examples = 10_000
-max_val_examples = 500
-print_frequency = 100
-output_location = 'raw-input.txt'
-val_output_location = 'raw-val-input.txt'
+    tokenizer = Tokenizer.from_file('tokenizer.json')
 
-num_examples = 0
-with open(output_location, 'w', encoding='utf-8') as train_file, open(val_output_location, 'w', encoding='utf-8') as val_file:
-    for example_chunk in dataset['train']:
-        example = example_chunk['text']
-        if num_examples % print_frequency == 0:
-            print(f"{num_examples:,} examples written")
+    with open('data.pkl', 'wb') as f, open('val_data.pkl', 'wb') as f_val:
+        examples = 0
+        for example in dataset['train']:
+            data = tokenizer.encode(example['text']).ids + tokenizer.encode("<|endoftext|>").ids
+            if examples < max_examples:
+                arr_data.append(data)
+            elif examples <= max_examples+max_val_examples:
+                val_data.append(data)
+            else:
+                narr_data = np.concatenate(arr_data)
+                if val_data:
+                    nval_data = np.concatenate(val_data)
+                else:
+                    exit("!!<<No Validation Data>>!!")
 
-        if num_examples < max_examples:
-            train_file.write(f"{example}")
-            num_examples += 1
+                pickle.dump(narr_data, f)
+                pickle.dump(nval_data, f_val)
+                break
 
-        elif num_examples < max_examples + max_val_examples:
-            val_file.write(f"{example}")
-            num_examples += 1
-        else:
-            break
-        
-        if num_examples >= max_examples + max_val_examples:
-            break
+            del data
             
-        
-with open(output_location, 'r', encoding='utf-8') as f:
-    train_text = f.read()
+            examples += 1
+            if examples % 1000 == 0:
+                print(examples)
 
-with open(val_output_location, 'r', encoding='utf-8') as f:
-    val_text = f.read()
+    print("Current: %d, Peak %d" % tracemalloc.get_traced_memory())
+    print(f"Current data.pkl size: {os.path.getsize('data.pkl')/(1024*1024):.3f}MB | Current val data.pkl size: {os.path.getsize('val_data.pkl')/(1024*1024):.3f}MB")
 
-from tokenizers import ByteLevelBPETokenizer
-tokenizer = ByteLevelBPETokenizer()
-tokenizer.train([output_location, val_output_location], vocab_size=12000)
-tokenizer.save('tokenizer.json')
+    with open('data.pkl', 'rb') as f:
+        arr_data = []
+        while True:
+            try:
+                data = pickle.load(f)
+                arr_data.append(data)
+            except EOFError:
+                break
+    
+    with open('val_data.pkl', 'rb') as f_val:
+        arr_val_data = []
+        while True:
+            try:
+                data_val = pickle.load(f_val)
+                arr_val_data.append(data_val)
+            except EOFError:
+                break
 
-print("Tokenizing...")
-tokenized_train_text = tokenizer.encode(train_text).ids
-tokenized_val_text = tokenizer.encode(val_text).ids
-torch.save(tokenized_train_text, 'tokenized_train_text.pt')
-torch.save(tokenized_val_text, 'tokenized_val_text.pt')
+    # print(f"-----------------Train\n{arr_data}\n ------------------Val\n{arr_val_data}")
