@@ -4,37 +4,46 @@ from torch.nn import functional as F
 from model import Model, ModelArgs
 import time
 import math
-import pickle
 import numpy as np
+from contextlib import nullcontext
 
-load = True
-batch_size = 32
-gradient_accumulation_steps = 16
+load = True # True to load model checkpoint, False to not load. WARNING: If False, it can override checkpoints!
+batch_size = 12
+gradient_accumulation_steps = 40
 grad_clip = 1.0
-window_size = 256 
-emb_dim = 256
-n_heads = 4
-n_layers = 4
+window_size = 512
+emb_dim = 384
+n_heads = 6
+n_layers = 6
 max_iters = 10_000
-eval_interval = 100
-save_interval = 300
+eval_interval = 25
+save_interval = 100
 warmup_iters = 300
 lr_decay_iters = max_iters
 learning_rate = 6e-4
 min_lr = 6e-5
 dropout = 0.0
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+fused = True if torch.cuda.is_available() else False
 eval_iters = 200
 
 torch.manual_seed(42)
 
-scaler = torch.cuda.amp.GradScaler()
+scaler = torch.cuda.amp.GradScaler(enabled=(dtype == torch.float16))
+ctx = nullcontext() if device == 'cpu' else torch.amp.autocast(device_type=device, dtype=dtype)
 
-train_data, val_data = pickle.load(open('data.pkl', 'rb')), pickle.load(open('val_data.pkl', 'rb'))
+train_data = np.memmap('train.bin', dtype=np.uint16, mode='r')
+val_data = np.memmap('val.bin', dtype=np.uint16, mode='r')
 print(f"Amount of tokens in training dataset: {train_data.shape[0]:,}")
-from tokenizers import Tokenizer
-tokenizer = Tokenizer.from_file("./tokenizer.json")
-vocab_size = tokenizer.get_vocab_size()
+
+import os
+if os.path.exists('./tokenizer.json'):
+    from tokenizers import Tokenizer
+    tokenizer = Tokenizer.from_file("./tokenizer.json")
+    vocab_size = tokenizer.get_vocab_size()
+else:
+    exit("!!<<No tokenizer found>>!!")
 
 def get_lr(it):
     if it < warmup_iters:
@@ -79,16 +88,17 @@ args = ModelArgs(emb_dim=emb_dim, n_heads=n_heads,
 model = Model(args).to(device)
 print(f"Number of parameters: {model.count_params():,}")
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-1, betas=(0.9, 0.95))
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-1, betas=(0.9, 0.95), fused=True)
 
-import os
 if os.path.exists('modelsave.pt') and load == True:
     checkpoint = torch.load('modelsave.pt')
     model.load_state_dict(checkpoint['model_params'])
     optimizer.load_state_dict(checkpoint['optimizer_params'])
     iter = checkpoint['iter']
+    print(f"Loaded checkpoint. Starting from iter {checkpoint['iter']:,}")
 else:
     iter = 0
+    print("?<No model checkpoint, training from scratch>?")
 
 xb, yb = get_batch('train')
 start_time = time.time()
@@ -112,7 +122,7 @@ while iter < max_iters:
         start_time = time.time()
 
     for g in range(gradient_accumulation_steps):
-        with torch.amp.autocast(device_type=device, dtype=torch.bfloat16):
+        with torch.amp.autocast(device_type=device, dtype=dtype):
             logits, loss = model(xb, yb)
             loss = loss / gradient_accumulation_steps
 
