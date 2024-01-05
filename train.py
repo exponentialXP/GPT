@@ -28,6 +28,9 @@ dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_suppo
 fused = True if torch.cuda.is_available() else False
 eval_iters = 200
 
+modelsave_path = 'modelsave.pt'
+tokenizer_path = 'tokenizer.json'
+
 torch.manual_seed(42)
 
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == torch.float16))
@@ -38,9 +41,9 @@ val_data = np.memmap('val.bin', dtype=np.uint16, mode='r')
 print(f"Amount of tokens in training dataset: {train_data.shape[0]:,}")
 
 import os
-if os.path.exists('./tokenizer.json'):
+if os.path.exists(tokenizer_path):
     from tokenizers import Tokenizer
-    tokenizer = Tokenizer.from_file("./tokenizer.json")
+    tokenizer = Tokenizer.from_file(tokenizer_path)
     vocab_size = tokenizer.get_vocab_size()
 else:
     exit("!!<<No tokenizer found>>!!")
@@ -90,8 +93,8 @@ print(f"Number of parameters: {model.count_params():,}")
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-1, betas=(0.9, 0.95), fused=True)
 
-if os.path.exists('modelsave.pt') and load == True:
-    checkpoint = torch.load('modelsave.pt')
+if os.path.exists(modelsave_path) and load == True:
+    checkpoint = torch.load(modelsave_path)
     model.load_state_dict(checkpoint['model_params'])
     optimizer.load_state_dict(checkpoint['optimizer_params'])
     iter = checkpoint['iter']
@@ -113,7 +116,7 @@ while iter < max_iters:
             'args': args,
             'iter': iter
         }
-        torch.save(checkpoint, f'modelsave.pt')
+        torch.save(checkpoint, modelsave_path)
     
     if iter % eval_interval == 0:
         losses = estimate_loss()
