@@ -4,7 +4,10 @@ import os
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-# torch.manual_seed(42)
+seed = 42 # None to make it random every time!
+
+if seed is not None:
+    torch.manual_seed(42)
 
 save_path = 'modelsave.pt'
 tokenizer_path = 'tokenizer.json'
