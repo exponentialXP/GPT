@@ -126,6 +126,7 @@ class Model(nn.Module):
     @torch.no_grad()
     def generate(self, x, max_new_tokens=500, temperature=1.0, p=None, view_probabilites=True):
         for _ in range(max_new_tokens):
+
             x_trim = x[:, -self.args.window_size:]
             logits, _ = self(x_trim)
             logits = logits[:, -1, :] / temperature
@@ -137,10 +138,13 @@ class Model(nn.Module):
                 probs[mask] = 0.0
                 probs.div_(probs.sum(dim=-1, keepdim=True))
 
+        if view_probabilites == True:
+            from tokenizers import Tokenizer
+            tokenizer_path = 'tokenizer.json'
+            tokenizer = Tokenizer.from_file(tokenizer_path)
+
             if view_probabilites == True:
                 max_displayed_probs = 60
-                from tokenizers import Tokenizer
-                tokenizer = Tokenizer.from_file('./tokenizer.json')
                 sorted_probs, indices = torch.sort(probs, descending=True, dim=1)
                 for i, (prob, index) in enumerate(zip(sorted_probs[0][:], indices[0][:])):
                     print(f"Token: {tokenizer.id_to_token(index)}, Prob: {prob}")
