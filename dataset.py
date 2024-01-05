@@ -1,67 +1,41 @@
-import tracemalloc
-import pickle
-import os
-from datasets import load_dataset 
-from tokenizers import Tokenizer
-import numpy as np
+from datasets import load_dataset
 from tqdm import tqdm
 
-if __name__ == '__main__':
-    arr_data = []
-    val_data = []
-    
-    max_examples = 500_000
-    max_val_examples = 5000
-    pbar = tqdm(total=max_examples+max_val_examples, desc="Tokenizing + Processing...")
-    tracemalloc.start()
-    dataset = load_dataset('openwebtext', streaming=True)
+max_examples = 800_000
+dset = load_dataset("openwebtext", split=f'train[0:{max_examples}]', cache_dir='./cache')
 
-    tokenizer = Tokenizer.from_file('tokenizer.json')
+split_dataset = dset.train_test_split(test_size=0.05, seed=42, shuffle=True)
+split_dataset['val'] = split_dataset.pop('test')
 
-    with open('data.pkl', 'wb') as f, open('val_data.pkl', 'wb') as f_val:
-        examples = 0
-        for example in dataset['train']:
-            data = tokenizer.encode(example['text']).ids + tokenizer.encode("<|endoftext|>").ids
-            if examples < max_examples:
-                arr_data.append(data)
-            elif examples <= max_examples+max_val_examples:
-                val_data.append(data)
-            else:
-                narr_data = np.concatenate(arr_data)
-                if val_data:
-                    nval_data = np.concatenate(val_data)
-                else:
-                    exit("!!<<No Validation Data>>!!")
+from tokenizers import Tokenizer
+tokenizer = Tokenizer.from_file("tokenizer.json")
 
-                pickle.dump(narr_data, f)
-                pickle.dump(nval_data, f_val)
-                break
+eot_id = tokenizer.encode('<|endoftext|>').ids
 
-            del data
-            
-            examples += 1
-            pbar.update(1)
+def process(example):
+    tokens = tokenizer.encode(example['text']).ids + eot_id
+    return {'tokens': tokens, 'len': len(tokens)}
 
+tokenized = split_dataset.map(
+    process,
+    remove_columns=['text'],
+    desc='Tokenizing the splits',
+)
 
-    print("Current: %d, Peak %d" % tracemalloc.get_traced_memory())
-    print(f"Current data.pkl size: {os.path.getsize('data.pkl')/(1024*1024):.3f}MB | Current val data.pkl size: {os.path.getsize('val_data.pkl')/(1024*1024):.3f}MB")
+import numpy as np
 
-    # with open('data.pkl', 'rb') as f:
-    #     arr_data = []
-    #     while True:
-    #         try:
-    #             data = pickle.load(f)
-    #             arr_data.append(data)
-    #         except EOFError:
-    #             break
-    
-    # with open('val_data.pkl', 'rb') as f_val:
-    #     arr_val_data = []
-    #     while True:
-    #         try:
-    #             data_val = pickle.load(f_val)
-    #             arr_val_data.append(data_val)
-    #         except EOFError:
-    #             break
+for split, example in tokenized.items():
+    length = np.sum(example['len'], dtype=np.int64)
+    filename = f"{split}.bin"
+    map = np.memmap(filename, dtype=np.uint16, mode='w+', shape=(length,))
 
-    # print(f"-----------------Train\n{arr_data}\n ------------------Val\n{arr_val_data}")
+    total_batches = 128
+    start_idx = 0
+
+    for ix in tqdm(range(total_batches), desc=f'Writing {filename}'):
+        batch = example.shard(num_shards=total_batches, index=ix, contiguous=True).with_format('numpy')
+        map_batch = np.concatenate(batch['tokens'])
+        map[start_idx: start_idx + len(map_batch)] = map_batch
+        start_idx += len(map_batch)
+
+    map.flush()
