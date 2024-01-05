@@ -124,24 +124,29 @@ class Model(nn.Module):
         return sum(p.numel() for p in self.parameters()) - self.pos_emb.weight.numel()
     
     @torch.no_grad()
-    def generate(self, x, max_new_tokens=500, temperature=1.0, p=None):
+    def generate(self, x, max_new_tokens=500, temperature=1.0, p=None, view_probabilites=True):
         for _ in range(max_new_tokens):
             x_trim = x[:, -self.args.window_size:]
             logits, _ = self(x_trim)
             logits = logits[:, -1, :] / temperature
+            probs = F.softmax(logits, dim=-1)
+
             if p is not None:
-                probs, indices = torch.sort(F.softmax(logits, dim=-1), descending=True)
                 probs_cumulative = torch.cumsum(probs, dim=0)
                 mask = probs_cumulative - probs > p
                 probs[mask] = 0.0
                 probs.div_(probs.sum(dim=-1, keepdim=True))
-            # max_displayed_probs = 60
-            # from tokenizers import Tokenizer
-            # tokenizer = Tokenizer.from_file('./tokenizer.json')
-            # for i, (prob, index) in enumerate(zip(probs[0][:], indices[0][:])):
-            #     print(f"Token: {tokenizer.id_to_token(index)}, Prob: {prob}")
-            #     if i > max_displayed_probs or prob == 0:
-            #         break
+
+            if view_probabilites == True:
+                max_displayed_probs = 60
+                from tokenizers import Tokenizer
+                tokenizer = Tokenizer.from_file('./tokenizer.json')
+                sorted_probs, indices = torch.sort(probs, descending=True, dim=1)
+                for i, (prob, index) in enumerate(zip(sorted_probs[0][:], indices[0][:])):
+                    print(f"Token: {tokenizer.id_to_token(index)}, Prob: {prob}")
+                    if i > max_displayed_probs:
+                        break
+                
             x_next = torch.multinomial(probs, num_samples=1) 
             x = torch.cat((x, x_next), dim=1) 
         return x
