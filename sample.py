@@ -22,17 +22,17 @@ if os.path.exists('tokenizer.json'):
 else:
     exit("!!<<Tokenizer.json not found!>>!")
 
-context = """<|endoftext|>""" # What are the next token(s) the model should predict based off the context?
-max_new_tokens = 256
+context = """<|endoftext|>"""
+max_new_tokens = 1
 p = .9
 num_samples = 1
-temperature = 1
+temperature = .8
 
 x = torch.tensor(tokenizer.encode(context).ids, dtype=torch.long, device=device).unsqueeze(0)
 
 with torch.no_grad():
     with torch.amp.autocast(device_type=device, dtype=dtype):
         for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, p=p)
+            y = model.generate(x, max_new_tokens, temperature=temperature, p=p, view_probabilites=False)
             print(tokenizer.decode(y[0].tolist()))
             print('---------------')
