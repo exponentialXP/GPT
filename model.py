@@ -125,6 +125,11 @@ class Model(nn.Module):
     
     @torch.no_grad()
     def generate(self, x, max_new_tokens=500, temperature=1.0, p=None, view_probabilites=True):
+        if view_probabilites == True:
+            from tokenizers import Tokenizer
+            tokenizer_path = 'tokenizer.json'
+            tokenizer = Tokenizer.from_file(tokenizer_path)
+            
         for _ in range(max_new_tokens):
 
             x_trim = x[:, -self.args.window_size:]
@@ -138,11 +143,6 @@ class Model(nn.Module):
                 probs[mask] = 0.0
                 probs.div_(probs.sum(dim=-1, keepdim=True))
 
-        if view_probabilites == True:
-            from tokenizers import Tokenizer
-            tokenizer_path = 'tokenizer.json'
-            tokenizer = Tokenizer.from_file(tokenizer_path)
-
             if view_probabilites == True:
                 max_displayed_probs = 60
                 sorted_probs, indices = torch.sort(probs, descending=True, dim=1)
@@ -150,6 +150,10 @@ class Model(nn.Module):
                     print(f"Token: {tokenizer.id_to_token(index)}, Prob: {prob}")
                     if i > max_displayed_probs:
                         break
+                
+            x_next = torch.multinomial(probs, num_samples=1) 
+            x = torch.cat((x, x_next), dim=1) 
+        return x
                 
             x_next = torch.multinomial(probs, num_samples=1) 
             x = torch.cat((x, x_next), dim=1) 
