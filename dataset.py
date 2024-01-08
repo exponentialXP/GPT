@@ -1,19 +1,20 @@
 from datasets import load_dataset
 from tqdm import tqdm
 
-max_examples = 800_000
+max_examples = 1_000_000 # 1 example = 1,000 tokens
 dset = load_dataset("openwebtext", split=f'train[0:{max_examples}]', cache_dir='./cache')
 
 split_dataset = dset.train_test_split(test_size=0.05, seed=42, shuffle=True)
 split_dataset['val'] = split_dataset.pop('test')
 
-from tokenizers import Tokenizer
-tokenizer = Tokenizer.from_file("tokenizer.json")
+from sentencepiece import SentencePieceProcessor
+tokenizer_path = 'tokenizer.model'
+tokenizer = SentencePieceProcessor(model_file=tokenizer_path)
 
-eot_id = tokenizer.encode('<|endoftext|>').ids
+eot_id = tokenizer.Encode('<|endoftext|>')
 
 def process(example):
-    tokens = tokenizer.encode(example['text']).ids + eot_id
+    tokens = tokenizer.Encode(example['text']) + eot_id
     return {'tokens': tokens, 'len': len(tokens)}
 
 tokenized = split_dataset.map(
