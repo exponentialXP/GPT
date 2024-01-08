@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import math
 from dataclasses import dataclass
+from tqdm import tqdm
 
 @dataclass
 class ModelArgs:
@@ -126,11 +127,11 @@ class Model(nn.Module):
     @torch.no_grad()
     def generate(self, x, max_new_tokens=500, temperature=1.0, p=None, view_probabilites=True):
         if view_probabilites == True:
-            from tokenizers import Tokenizer
-            tokenizer_path = 'tokenizer.json'
-            tokenizer = Tokenizer.from_file(tokenizer_path)
+            from sentencepiece import SentencePieceProcessor
+            tokenizer_path = 'tokenizer.model'
+            tokenizer = SentencePieceProcessor(model_file=tokenizer_path)
             
-        for _ in range(max_new_tokens):
+        for _ in tqdm(range(max_new_tokens), desc="Generating..."):
 
             x_trim = x[:, -self.args.window_size:]
             logits, _ = self(x_trim)
@@ -147,13 +148,10 @@ class Model(nn.Module):
                 max_displayed_probs = 60
                 sorted_probs, indices = torch.sort(probs, descending=True, dim=1)
                 for i, (prob, index) in enumerate(zip(sorted_probs[0][:], indices[0][:])):
-                    print(f"Token: {tokenizer.id_to_token(index)}, Prob: {prob}")
+                    print(f"Token: {tokenizer.Decode(index.tolist())}, Prob: {prob}")
                     if i > max_displayed_probs:
+                        print("\n------------------------\n")
                         break
-                
-            x_next = torch.multinomial(probs, num_samples=1) 
-            x = torch.cat((x, x_next), dim=1) 
-        return x
                 
             x_next = torch.multinomial(probs, num_samples=1) 
             x = torch.cat((x, x_next), dim=1) 
