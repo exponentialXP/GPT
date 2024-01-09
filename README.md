@@ -1,3 +1,5 @@
+This repository is all for speed + performance while keeping the code simple and easy to read
+
 Requirements:
 torch, numpy, tokenizers
 
