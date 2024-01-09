@@ -12,3 +12,5 @@ Use TRAIN.py to download the model on your dataset
 Use SAMPLE.py to generate using your model checkpoint
 
 Happy Language Modelling! :)
+
+Note: A good chunk of the MODEL.py and TRAIN.py's code was from Andrej Karpathy's nanoGPT: https://github.com/karpathy/nanoGPT
