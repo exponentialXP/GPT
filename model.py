@@ -30,7 +30,7 @@ def precompute_theta_freqs(args: ModelArgs):
     assert head_dim % 2 == 0, "Embedding dimension must be divisible by 2"
 
     theta_arange = torch.arange(0, head_dim, 2).float()
-    theta = 1.0 / (args.theta ** (theta_arange / head_dim)).to(args.device)
+    theta = 1.0 / (10000 ** (theta_arange / head_dim)).to(args.device)
     m = torch.arange(window_size, device=args.device)
     freqs = torch.outer(m, theta).float()
     complex_freqs = torch.polar(torch.ones_like(freqs), freqs)
@@ -40,6 +40,7 @@ def apply_rotary_embeddings(x, freqs_complex, args: ModelArgs):
     x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
     freqs_complex = freqs_complex.unsqueeze(0).unsqueeze(2)
     freqs_complex = freqs_complex.transpose(1, 2)
+    freqs_complex = freqs_complex[:, :, :x_complex.shape[2], :]
     x_rotated = x_complex * freqs_complex
     x_out = torch.view_as_real(x_rotated)
     x_out = x_out.reshape(*x.shape)
