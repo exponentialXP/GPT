@@ -4,27 +4,28 @@ from torch.nn import functional as F
 from model import Model, ModelArgs
 import time
 import math
-import numpy as np
+import numpy as np 
 from contextlib import nullcontext
 
-# Decrease emb_dim, n_heads, n_layers and batch_size if running out of memory
+# Decrease emb_dim, n_heads, n_layers and batch_size if running out of memory / too slow but will decrease performance
+# Please follow the Cuda tutorial in README.md to GREATLY speed up training + sampling
 
 load = True # True to load model checkpoint, False to not load. WARNING: If False, it can override checkpoints!
 batch_size = 8
-gradient_accumulation_steps = 40
+gradient_accumulation_steps = 40 
 grad_clip = 1.0
 window_size = 512
 emb_dim = 512 
 n_heads = 8
 n_layers = 8
 max_iters = 10_000
-eval_interval = 100
+eval_interval = 40
 save_interval = 100
 warmup_iters = 300
 lr_decay_iters = max_iters
 learning_rate = 6e-4
 min_lr = 6e-5
-dropout = 0.0
+dropout = 0.0 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
 fused = True if torch.cuda.is_available() else False
@@ -107,6 +108,7 @@ else:
 
 xb, yb = get_batch('train')
 start_time = time.time()
+
 while iter < max_iters:
     for param_group in optimizer.param_groups:
         param_group['lr'] = get_lr(iter)
@@ -143,5 +145,6 @@ while iter < max_iters:
 
     iter += 1
 
+print("Training has FINISHED!")
 context = torch.tensor((tokenizer.encode("<|endoftext|>").ids), dtype=torch.long, device=device).unsqueeze(0)
 print(tokenizer.decode(model.generate(context, max_new_tokens=500)[0].tolist()))
