@@ -24,6 +24,27 @@ class LayerNorm(nn.Module):
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
     
+def precompute_theta_freqs(args: ModelArgs):
+    head_dim = args.emb_dim // args.n_heads
+    window_size = args.window_size * 2
+    assert head_dim % 2 == 0, "Embedding dimension must be divisible by 2"
+
+    theta_arange = torch.arange(0, head_dim, 2).float()
+    theta = 1.0 / (args.theta ** (theta_arange / head_dim)).to(args.device)
+    m = torch.arange(window_size, device=args.device)
+    freqs = torch.outer(m, theta).float()
+    complex_freqs = torch.polar(torch.ones_like(freqs), freqs)
+    return complex_freqs
+
+def apply_rotary_embeddings(x, freqs_complex, args: ModelArgs):
+    x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+    freqs_complex = freqs_complex.unsqueeze(0).unsqueeze(2)
+    freqs_complex = freqs_complex.transpose(1, 2)
+    x_rotated = x_complex * freqs_complex
+    x_out = torch.view_as_real(x_rotated)
+    x_out = x_out.reshape(*x.shape)
+    return x_out.type_as(x).to(args.device)
+
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
@@ -32,34 +53,37 @@ class Attention(nn.Module):
         self.wq = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
         self.wk = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
         self.wv = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
-        self.wo = nn.Linear(args.n_heads * self.head_dim, args.emb_dim, bias=False)
-        self.dropout = nn.Dropout(args.dropout)
-        self.register_buffer('tril', torch.tril(torch.ones(args.window_size, args.window_size)))
-    
-    def forward(self, x):
+        self.proj = nn.Linear(args.n_heads * self.head_dim, args.emb_dim, bias=False)
+        self.attn_dropout = nn.Dropout(args.dropout)
+        self.residual_dropout = nn.Dropout(args.dropout)
+        self.dropout = args.dropout
+
+    def forward(self, x, freqs_complex):
         B, T, C = x.shape
         q = self.wq(x)
         k = self.wk(x)
         v = self.wv(x)
-        wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
-        wei = F.softmax(wei, dim=-1) 
-        v = self.wv(x)
-        out = wei @ v
-        return self.dropout(out)
+        q = q.view(B, T, self.args.n_heads, C // self.args.n_heads).transpose(1, 2)
+        k = k.view(B, T, self.args.n_heads, C // self.args.n_heads).transpose(1, 2)
+        v = v.view(B, T, self.args.n_heads, C // self.args.n_heads).transpose(1, 2)
+        q = apply_rotary_embeddings(q, freqs_complex, self.args)
+        k = apply_rotary_embeddings(k, freqs_complex, self.args)
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        return self.residual_dropout(self.proj(y))
 
 class FeedForward(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.fc1 = nn.Linear(args.emb_dim, args.emb_dim*4, bias=False)
         self.silu = nn.SiLU()
-        self.c_proj = nn.Linear(args.emb_dim*4, args.emb_dim, bias=False)
+        self.proj = nn.Linear(args.emb_dim*4, args.emb_dim, bias=False)
         self.dropout = nn.Dropout(args.dropout)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.silu(x)
-        x = self.c_proj(x)  
+        x = self.proj(x)  
         x = self.dropout(x)
         return x
 
@@ -71,8 +95,8 @@ class Block(nn.Module):
         self.norm2 = LayerNorm(args.emb_dim)
         self.mlp = FeedForward(args)
     
-    def forward(self, x):
-        x = x + self.attn(self.norm1(x))
+    def forward(self, x, freqs_complex):
+        x = x + self.attn.forward(self.norm1(x), freqs_complex)
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -81,7 +105,7 @@ class Model(nn.Module):
         super().__init__()
         self.args = args
         self.tok_emb = nn.Embedding(args.vocab_size, args.emb_dim)
-        self.pos_emb = nn.Embedding(args.window_size, args.emb_dim)
+        self.freqs_complex = precompute_theta_freqs(self.args)
         self.dropout = nn.Dropout(args.dropout)
         self.blocks = nn.ModuleList([Block(args) for _ in range(args.n_layers)])
         self.ln_f = nn.LayerNorm(args.emb_dim)
@@ -90,7 +114,7 @@ class Model(nn.Module):
         self.tok_emb.weight = self.lm_head.weight
         self.apply(self._init_weights)
         for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
+            if pn.endswith('proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * args.n_layers))
 
     def _init_weights(self, module):
@@ -103,11 +127,10 @@ class Model(nn.Module):
 
     def forward(self, x, targets=None):
         B, T = x.shape
-        tok = self.tok_emb(x) 
-        pos = self.pos_emb(torch.arange(T, device=self.args.device))
-        x = self.dropout(tok + pos)
+        x = self.dropout(self.tok_emb(x))
+        freqs_complex = self.freqs_complex[:self.args.window_size] 
         for block in self.blocks:
-            x = block(x)
+            x = block(x, freqs_complex)
         x = self.ln_f(x)
         logits = self.lm_head(x)
 
@@ -122,7 +145,7 @@ class Model(nn.Module):
         return logits, loss
 
     def count_params(self):
-        return sum(p.numel() for p in self.parameters()) - self.pos_emb.weight.numel()
+        return sum(p.numel() for p in self.parameters())
     
     @torch.no_grad()
     def generate(self, x, max_new_tokens=500, temperature=1.0, p=None, view_probabilites=True):
