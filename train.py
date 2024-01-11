@@ -7,12 +7,14 @@ import math
 import numpy as np
 from contextlib import nullcontext
 
+# Decrease emb_dim, n_heads, n_layers and batch_size if running out of memory
+
 load = True # True to load model checkpoint, False to not load. WARNING: If False, it can override checkpoints!
 batch_size = 8
 gradient_accumulation_steps = 40
 grad_clip = 1.0
 window_size = 512
-emb_dim = 512
+emb_dim = 512 
 n_heads = 8
 n_layers = 8
 max_iters = 10_000
@@ -109,7 +111,7 @@ while iter < max_iters:
     for param_group in optimizer.param_groups:
         param_group['lr'] = get_lr(iter)
     
-    if iter % save_interval == 0:
+    if iter % save_interval == 0 and iter != 0:
         checkpoint = {
             'model_params': model.state_dict(), 
             'optimizer_params': optimizer.state_dict(), 
