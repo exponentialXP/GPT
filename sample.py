@@ -22,7 +22,7 @@ if os.path.exists(save_path):
     model = Model(args)
     model.to(device)
     model.load_state_dict(checkpoint['model_params'])
-    print(f"Resuming from iter {checkpoint['iter']:,}\nParameters: {sum(p.numel() for p in model.parameters()) - model.pos_emb.weight.numel():,}")
+    print(f"Resuming from iter {checkpoint['iter']:,}\nParameters: {model.count_params():,}")
 
 else:
     exit("!!<<Model Checkpoint not found!>>!!")
@@ -36,7 +36,7 @@ else:
     exit("!!<<No tokenizer found>>!!")
 
 context = """<|endoftext|>"""
-max_new_tokens = 3
+max_new_tokens = 256
 p = .9
 num_samples = 1
 temperature = .8
