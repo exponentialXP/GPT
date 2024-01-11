@@ -6,6 +6,7 @@ Requirements Install Tutorial (super easy!)
 (in command prompt/terminal do pip install numpy sentencepiece, and then go to https://pytorch.org and put in your OS, package as pip, language as python and pick the latest stable version
 
 GPU not needed, but will speed up TRAIN.py. 
+To use CUDA to GREATLY speed up training follow this tutorial :): https://www.youtube.com/watch?v=r7Am-ZGMef8&t=542s
 Feel free to experiment with the hyperparameters!
 
 Guide:
