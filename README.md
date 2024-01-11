@@ -1,7 +1,9 @@
 This repository is all for speed + performance while keeping the code simple and easy to read
 
 Requirements:
-torch, numpy, tokenizers
+torch 2.0+, numpy, sentencepiece 
+Requirements Install Tutorial (super easy!)
+(in command prompt/terminal do pip install numpy sentencepiece, and then go to https://pytorch.org and put in your OS, package as pip, language as python and pick the latest stable version
 
 GPU not needed, but will speed up TRAIN.py. 
 Feel free to experiment with the hyperparameters!
