@@ -12,14 +12,14 @@ from contextlib import nullcontext
 
 load = True # True to load model checkpoint, False to not load. WARNING: If False, it can override checkpoints!
 batch_size = 8
-gradient_accumulation_steps = 40 
+gradient_accumulation_steps = 40
 grad_clip = 1.0
 window_size = 512
-emb_dim = 512 
+emb_dim = 512
 n_heads = 8
 n_layers = 8
 max_iters = 10_000
-eval_interval = 40
+eval_interval = 100
 save_interval = 100
 warmup_iters = 300
 lr_decay_iters = max_iters
@@ -32,7 +32,7 @@ fused = True if torch.cuda.is_available() else False
 eval_iters = 200
 
 modelsave_path = 'modelsave.pt'
-tokenizer_path = 'tokenizer.model'
+tokenizer_path = 'tokenizer.json'
 
 torch.manual_seed(42)
 
@@ -45,9 +45,9 @@ print(f"Amount of tokens in training dataset: {train_data.shape[0]:,}")
 
 import os
 if os.path.exists(tokenizer_path):
-    from sentencepiece import SentencePieceProcessor
-    tokenizer = SentencePieceProcessor(model_file=tokenizer_path)
-    vocab_size = tokenizer.vocab_size()
+    from tokenizers import Tokenizer
+    tokenizer = Tokenizer.from_file(tokenizer_path)
+    vocab_size = tokenizer.get_vocab_size()
 else:
     exit("!!<<No tokenizer found>>!!")
 
@@ -88,7 +88,7 @@ def estimate_loss():
 
 args = ModelArgs(emb_dim=emb_dim, n_heads=n_heads, 
                 window_size=window_size, n_layers=n_layers,
-                dropout=dropout,
+                dropout=dropout, batch_size=batch_size,
                 vocab_size=vocab_size, device=device)
 
 model = Model(args).to(device)
