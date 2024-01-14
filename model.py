@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 import math
 from dataclasses import dataclass
-from tqdm import tqdm
 
 @dataclass
 class ModelArgs:
@@ -12,17 +11,21 @@ class ModelArgs:
     n_layers: int = -1
     dropout: float = -1
     window_size: int = -1
+    batch_size: int = -1
     vocab_size: int = -1
     device: str = 'cpu'
 
-class LayerNorm(nn.Module):
-    def __init__(self, ndim):
+class RMSNorm(nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(ndim))
-        self.bias = None
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
 
-    def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+    def _norm(self, x: torch.Tensor):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x: torch.Tensor):
+        return self.weight * self._norm(x.float()).type_as(x)
     
 def precompute_theta_freqs(args: ModelArgs):
     head_dim = args.emb_dim // args.n_heads
@@ -40,7 +43,8 @@ def apply_rotary_embeddings(x, freqs_complex, args: ModelArgs):
     x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
     freqs_complex = freqs_complex.unsqueeze(0).unsqueeze(2)
     freqs_complex = freqs_complex.transpose(1, 2)
-    freqs_complex = freqs_complex[:, :, :x_complex.shape[2], :]
+    if freqs_complex.shape[2] != x_complex.shape[2]:
+        freqs_complex = freqs_complex[:, :, :x_complex.shape[2], :]
     x_rotated = x_complex * freqs_complex
     x_out = torch.view_as_real(x_rotated)
     x_out = x_out.reshape(*x.shape)
@@ -55,6 +59,8 @@ class Attention(nn.Module):
         self.wk = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
         self.wv = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
         self.proj = nn.Linear(args.n_heads * self.head_dim, args.emb_dim, bias=False)
+        self.cache_k = torch.zeros((args.batch_size, args.window_size, args.n_heads, self.head_dim))
+        self.cache_v = torch.zeros((args.batch_size, args.window_size, args.n_heads, self.head_dim))
         self.attn_dropout = nn.Dropout(args.dropout)
         self.residual_dropout = nn.Dropout(args.dropout)
         self.dropout = args.dropout
@@ -91,9 +97,9 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        self.norm1 = LayerNorm(args.emb_dim)
+        self.norm1 = RMSNorm(args.emb_dim)
         self.attn = Attention(args)
-        self.norm2 = LayerNorm(args.emb_dim)
+        self.norm2 = RMSNorm(args.emb_dim)
         self.mlp = FeedForward(args)
     
     def forward(self, x, freqs_complex):
@@ -109,10 +115,11 @@ class Model(nn.Module):
         self.freqs_complex = precompute_theta_freqs(self.args)
         self.dropout = nn.Dropout(args.dropout)
         self.blocks = nn.ModuleList([Block(args) for _ in range(args.n_layers)])
-        self.ln_f = nn.LayerNorm(args.emb_dim)
+        self.ln_f = RMSNorm(args.emb_dim)
         self.lm_head = nn.Linear(args.emb_dim, args.vocab_size)
 
         self.tok_emb.weight = self.lm_head.weight
+        
         self.apply(self._init_weights)
         for pn, p in self.named_parameters():
             if pn.endswith('proj.weight'):
@@ -149,13 +156,15 @@ class Model(nn.Module):
         return sum(p.numel() for p in self.parameters())
     
     @torch.no_grad()
-    def generate(self, x, max_new_tokens=500, temperature=1.0, p=None, view_probabilites=True):
-        if view_probabilites == True:
-            from sentencepiece import SentencePieceProcessor
-            tokenizer_path = 'tokenizer.model'
-            tokenizer = SentencePieceProcessor(model_file=tokenizer_path)
+    def generate(self, x, max_new_tokens=500, mode='print', temperature=1.0, p=None, view_probabilites=True):
+        self.eval()
+        import sys
+        import time
+        from tokenizers import Tokenizer
+        tokenizer_path = 'tokenizer.json'
+        tokenizer = Tokenizer.from_file(tokenizer_path)
             
-        for _ in tqdm(range(max_new_tokens), desc="Generating..."):
+        for _ in range(max_new_tokens):
 
             x_trim = x[:, -self.args.window_size:]
             logits, _ = self(x_trim)
@@ -169,14 +178,19 @@ class Model(nn.Module):
                 probs.div_(probs.sum(dim=-1, keepdim=True))
 
             if view_probabilites == True:
-                max_displayed_probs = 60
+                max_displayed_probs = 25
                 sorted_probs, indices = torch.sort(probs, descending=True, dim=1)
                 for i, (prob, index) in enumerate(zip(sorted_probs[0][:], indices[0][:])):
-                    print(f"Token: {tokenizer.Decode(index.tolist())}, Prob: {prob}")
+                    print(f"Token: {tokenizer.decode([index])}, Prob: {prob}")
                     if i > max_displayed_probs:
                         print("\n------------------------\n")
                         break
-                
+
             x_next = torch.multinomial(probs, num_samples=1) 
+            next_token = tokenizer.decode([x_next.item()])
+            if mode == 'print':
+                sys.stdout.write(next_token)
+                sys.stdout.flush()
             x = torch.cat((x, x_next), dim=1) 
+        self.train()
         return x
