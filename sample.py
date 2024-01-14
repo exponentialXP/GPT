@@ -1,7 +1,6 @@
 from model import Model
 import torch
 import os
-from tqdm import tqdm
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
@@ -14,7 +13,7 @@ if seed is not None:
     torch.manual_seed(42)
 
 save_path = 'modelsave.pt'
-tokenizer_path = 'tokenizer.model'
+tokenizer_path = 'tokenizer.json'
 
 if os.path.exists(save_path):
     checkpoint = torch.load(save_path)
@@ -29,33 +28,33 @@ else:
 
 import os
 if os.path.exists(tokenizer_path):
-    from sentencepiece import SentencePieceProcessor
-    tokenizer = SentencePieceProcessor(model_file=tokenizer_path)
-    vocab_size = tokenizer.vocab_size()
+    from tokenizers import Tokenizer
+    tokenizer = Tokenizer.from_file(tokenizer_path)
 else:
     exit("!!<<No tokenizer found>>!!")
 
-context = """<|endoftext|>"""
-max_new_tokens = 256
+context = "<|endoftext|>"
+max_new_tokens = 1500
 p = .9
-num_samples = 1
-temperature = .8
+num_samples = 999999
+temperature = .95
+view_probabilites = False
 
-x = torch.tensor(tokenizer.Encode(context), dtype=torch.long, device=device).unsqueeze(0)
+x = torch.tensor(tokenizer.encode(context).ids, dtype=torch.long, device=device).unsqueeze(0)
 
 if mode == 'print':
     with torch.no_grad():
         with torch.amp.autocast(device_type=device, dtype=dtype):
-            for k in tqdm(range(num_samples), desc="Generating samples..."):
-                y = model.generate(x, max_new_tokens, temperature=temperature, p=p, view_probabilites=False)
-                print(tokenizer.decode(y[0].tolist()))
+            for k in range(num_samples):
+                print("\n", context, end="")
+                model.generate(x, max_new_tokens, temperature=temperature, p=p, view_probabilites=view_probabilites)
                 print('\n---------------\n')
 
 elif mode == 'write':
     with open(write_file_path, 'w', encoding='utf-8') as f:
         with torch.no_grad():
             with torch.amp.autocast(device_type=device, dtype=dtype):
-                for k in tqdm(range(num_samples), desc="Generating samples..."):
-                    y = model.generate(x, max_new_tokens, temperature=temperature, p=p, view_probabilites=False)
-                    f.write(tokenizer.decode(y[0].tolist()))
+                for k in range(num_samples):
+                    y = model.generate(x, max_new_tokens, mode='write', temperature=temperature, p=p, view_probabilites=view_probabilites)
+                    f.write(tokenizer.decode(y[0].tolist())) 
                     f.write('\n---------------\n')
