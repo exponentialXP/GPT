@@ -59,8 +59,6 @@ class Attention(nn.Module):
         self.wk = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
         self.wv = nn.Linear(args.emb_dim, args.n_heads * self.head_dim, bias=False)
         self.proj = nn.Linear(args.n_heads * self.head_dim, args.emb_dim, bias=False)
-        self.cache_k = torch.zeros((args.batch_size, args.window_size, args.n_heads, self.head_dim))
-        self.cache_v = torch.zeros((args.batch_size, args.window_size, args.n_heads, self.head_dim))
         self.attn_dropout = nn.Dropout(args.dropout)
         self.residual_dropout = nn.Dropout(args.dropout)
         self.dropout = args.dropout
