@@ -3,7 +3,7 @@ This repository is all for speed + performance while keeping the code simple and
 Requirements:
 torch 2.0+, numpy, tokenizers 
 Requirements Install Tutorial (super easy!)
-(in command prompt/terminal do pip install numpy tokenizers, and then go to https://pytorch.org and put in your OS, package as pip, language as python and pick the latest stable version and put in cmd
+(in command prompt/terminal do pip install numpy tokenizers, and then go to https://pytorch.org and put in your OS, package as pip, language as python and pick the latest stable version and put in command prompt/terminal
 
 GPU not needed, but will speed up TRAIN.py. 
 To use CUDA to GREATLY speed up training follow this tutorial :): https://www.youtube.com/watch?v=r7Am-ZGMef8&t=542s
