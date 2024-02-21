@@ -33,7 +33,7 @@ for split, example in tokenized.items():
     filename = f"{split}.bin"
     map = np.memmap(filename, dtype=np.uint16, mode='w+', shape=(length,))
 
-    total_batches = min(max_examples*test_size, 512)
+    total_batches = int(min(max_examples*test_size, 512))
     if total_batches < 1:
         exit("!!<<Number of batches too small>>!!")
 
